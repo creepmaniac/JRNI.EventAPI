@@ -34,37 +34,41 @@ namespace JRNI.EventAPI.Implementation
                     {
                         case HttpStatusCode.OK:
                             var json = await response.Content.ReadAsStringAsync();
-                            var eventsResponse = JsonConvert.DeserializeObject<EventsApiResponse>(json);
-
-                            var futureEvents = eventsResponse.Events
-                                .Where(e => e.Status == "Busy" || e.Status == "OutOfOffice")
-                                .ToList();
-
-                            var updatedResponse = new EventsApiResponse
+                            if (TryParseEventsApiResponse(json, out var eventsResponse))
                             {
-                                Email = email,
-                                Number_of_events = futureEvents.Count,
-                                Events = futureEvents.ToList(), // Ensure a new list instance
-                            };
+                                var futureEvents = eventsResponse.Events
+                                    .Where(e => e.Status == "Busy" || e.Status == "OutOfOffice")
+                                    .ToList();
 
-                            _logger.LogInformation("API call is successful");
-                            return new OkObjectResult(updatedResponse);
+                                var updatedResponse = new EventsApiResponse
+                                {
+                                    Email = email,
+                                    Number_of_events = futureEvents.Count,
+                                    Events = futureEvents.ToList(), // Ensure a new list instance
+                                };
+
+                                _logger.LogInformation("API call is successful");
+                                return new OkObjectResult(updatedResponse);
+                            }
+                            else
+                            {
+                                // Handle parsing error
+                                return new ObjectResult(new { message = "Error parsing API response" })
+                                {
+                                    StatusCode = (int)HttpStatusCode.InternalServerError
+                                };
+                            }
 
                         case HttpStatusCode.BadRequest:
                         case HttpStatusCode.TooManyRequests:
                         case HttpStatusCode.InternalServerError:
                         case HttpStatusCode.GatewayTimeout:
                             var errorMessage = await response.Content.ReadAsStringAsync();
-                            //var errorMessage = JsonConvert.DeserializeObject<ErrorMessage>(jsonError);
-                            _logger.LogError(
-                                $"API error - Status Code: {response.StatusCode}, Message: {errorMessage}");
-                            return new ObjectResult(new { message = errorMessage ?? "Unknown error" })
-                            {
-                                StatusCode = (int)response.StatusCode
-                            };
+                            LogApiError(response.StatusCode, errorMessage);
+                            return HandleErrorResponse(response.StatusCode, errorMessage);
 
                         default:
-                            _logger.LogError($"Unexpected API response - Status Code: {response.StatusCode}");
+                            LogApiError(response.StatusCode, "Unexpected API response");
                             return new ObjectResult(new { message = "Unexpected error" })
                             {
                                 StatusCode = (int)response.StatusCode
@@ -75,8 +79,63 @@ namespace JRNI.EventAPI.Implementation
             catch (HttpRequestException ex)
             {
                 // Log the exception using ILogger
-                _logger.LogError($"An error occurred: {ex.Message}");
+                LogApiError(HttpStatusCode.InternalServerError, $"An error occurred: {ex.Message}");
                 return new StatusCodeResult(500);
+            }
+        }
+
+        private bool TryParseEventsApiResponse(string json, out EventsApiResponse eventsResponse)
+        {
+            try
+            {
+                eventsResponse = JsonConvert.DeserializeObject<EventsApiResponse>(json);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error parsing JSON response: {ex.Message}");
+                eventsResponse = null;
+                return false;
+            }
+        }
+
+        private void LogApiError(HttpStatusCode statusCode, string errorMessage)
+        {
+            _logger.LogError($"API error - Status Code: {statusCode}, Message: {errorMessage}");
+        }
+
+        private ActionResult HandleErrorResponse(HttpStatusCode statusCode, string errorMessage)
+        {
+            var defaultErrorMessage = errorMessage ?? "Unknown error";
+
+            switch (statusCode)
+            {
+                case HttpStatusCode.BadRequest:
+                    return new BadRequestObjectResult(defaultErrorMessage);
+
+                case HttpStatusCode.TooManyRequests:
+                    return new ObjectResult(new { message = defaultErrorMessage })
+                    {
+                        StatusCode = (int)HttpStatusCode.TooManyRequests
+                    };
+
+                case HttpStatusCode.InternalServerError:
+                    return new ObjectResult(new { message = defaultErrorMessage })
+                    {
+                        StatusCode = (int)HttpStatusCode.InternalServerError
+                    };
+
+                case HttpStatusCode.GatewayTimeout:
+                    return new ObjectResult(new { message = defaultErrorMessage })
+                    {
+                        StatusCode = (int)HttpStatusCode.GatewayTimeout
+                    };
+
+                default:
+                    return new ObjectResult(new { message = defaultErrorMessage })
+                    {
+                        StatusCode = (int)statusCode
+                    };
             }
         }
     }
