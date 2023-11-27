@@ -35,7 +35,7 @@ This .NET Core API application serves as a client for an external API that provi
 
 1. **Clone the Repository:**
    ```bash
-   git clone https://github.com/creepmaniac/JRNI.EventAPI.git
+   git clone https://github.com/yourusername/your-repository.git
 2. **Build and Run the Application:**
    ```bash
    cd your-repository
